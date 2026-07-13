@@ -530,7 +530,7 @@
             <div class="section-title">
                 <h2>Configurações do App</h2>
             </div>
-            <p class="subtitle">Altere textos, adicione/exclua categorias, produtos ou faça backup.</p>
+            <p class="subtitle">Altere textos, adicione/exclua categorias e produtos.</p>
 
             <!-- Seção de Importação e Exportação de Backup -->
             <div style="background: white; padding: 15px; border-radius: 12px; margin-bottom: 15px;">
@@ -540,16 +540,6 @@
                     <button class="btn-submit" onclick="document.getElementById('import-file').click()" style="margin-top: 0; background-color: #ff9800;">Importar Dados</button>
                 </div>
                 <input type="file" id="import-file" accept=".json" style="display: none;" onchange="importData(event)">
-            </div>
-
-            <!-- Importação em Massa de Produtos -->
-            <div style="background: white; padding: 15px; border-radius: 12px; margin-bottom: 15px;">
-                <h4 style="margin-bottom: 10px;">Importar Produtos em Massa</h4>
-                <div class="form-group">
-                    <label>Cole aqui os produtos (CSV ou JSON)</label>
-                    <textarea id="bulk-import-area" placeholder="CSV: nome,preco,unidade,categoria,imagem&#10;Ou JSON: [{&quot;name&quot;:&quot;...&quot;,&quot;price&quot;:...}]"></textarea>
-                </div>
-                <button class="btn-submit" onclick="importBulkProducts()" style="padding: 10px;">Importar Produtos</button>
             </div>
 
             <!-- Alterar Textos do App -->
@@ -899,56 +889,6 @@
                 
                 saveData();
                 renderProducts();
-            }
-        }
-
-        // ============ IMPORTAÇÃO EM MASSA ============
-
-        function importBulkProducts() {
-            const textarea = document.getElementById('bulk-import-area').value;
-            if(!textarea.trim()) return alert("Cole os dados primeiro!");
-
-            try {
-                let newProducts = [];
-                
-                if(textarea.trim().startsWith('[')) {
-                    // Formato JSON
-                    let jsonData = JSON.parse(textarea);
-                    newProducts = jsonData.map((item, index) => ({
-                        id: Date.now() + index,
-                        name: item.name || item.Nome || '',
-                        price: parseFloat(item.price || item.Preço || 0),
-                        unit: item.unit || item.Unidade || '/unid',
-                        category: item.category || item.Categoria || categories[0]?.id || 'cat-1',
-                        img: item.img || item.Imagem || 'https://cdn-icons-png.flaticon.com/512/1047/1047553.png',
-                        order: products.length + index
-                    }));
-                } else {
-                    // Formato CSV
-                    let lines = textarea.trim().split('\n');
-                    newProducts = lines.map((line, index) => {
-                        let parts = line.split(',').map(p => p.trim());
-                        return {
-                            id: Date.now() + index,
-                            name: parts[0] || '',
-                            price: parseFloat(parts[1]) || 0,
-                            unit: parts[2] || '/unid',
-                            category: parts[3] || categories[0]?.id || 'cat-1',
-                            img: parts[4] || 'https://cdn-icons-png.flaticon.com/512/1047/1047553.png',
-                            order: products.length + index
-                        };
-                    }).filter(p => p.name);
-                }
-
-                if(newProducts.length === 0) return alert("Nenhum produto válido encontrado!");
-
-                products = products.concat(newProducts);
-                saveData();
-                renderProducts();
-                document.getElementById('bulk-import-area').value = '';
-                alert(`${newProducts.length} produtos importados com sucesso!`);
-            } catch(err) {
-                alert("Erro ao processar. Verifique o formato:\nCSV: nome,preco,unidade,categoria,imagem\nJSON: [{name:..., price:...}]");
             }
         }
 
