@@ -185,6 +185,16 @@
             display: flex;
             flex-direction: column;
             position: relative;
+            cursor: grab;
+            user-select: none;
+            touch-action: none;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .product-card.dragging {
+            opacity: 0.5;
+            cursor: grabbing;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
         }
 
         .product-card img {
@@ -303,12 +313,18 @@
             color: var(--text-muted);
         }
 
-        .form-group input, .form-group select {
+        .form-group input, .form-group select, .form-group textarea {
             width: 100%;
             padding: 10px;
             border: 1px solid #ccc;
             border-radius: 8px;
             font-size: 0.9rem;
+            font-family: inherit;
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
         }
 
         .btn-submit {
@@ -429,6 +445,11 @@
             border-radius: 6px;
             font-size: 0.85rem;
         }
+
+        .manage-cat-item .material-icons {
+            cursor: pointer;
+            font-size: 18px;
+        }
     </style>
 </head>
 <body>
@@ -521,6 +542,16 @@
                 <input type="file" id="import-file" accept=".json" style="display: none;" onchange="importData(event)">
             </div>
 
+            <!-- Importação em Massa de Produtos -->
+            <div style="background: white; padding: 15px; border-radius: 12px; margin-bottom: 15px;">
+                <h4 style="margin-bottom: 10px;">Importar Produtos em Massa</h4>
+                <div class="form-group">
+                    <label>Cole aqui os produtos (CSV ou JSON)</label>
+                    <textarea id="bulk-import-area" placeholder="CSV: nome,preco,unidade,categoria,imagem&#10;Ou JSON: [{&quot;name&quot;:&quot;...&quot;,&quot;price&quot;:...}]"></textarea>
+                </div>
+                <button class="btn-submit" onclick="importBulkProducts()" style="padding: 10px;">Importar Produtos</button>
+            </div>
+
             <!-- Alterar Textos do App -->
             <div style="background: white; padding: 15px; border-radius: 12px; margin-bottom: 15px;">
                 <h4 style="margin-bottom: 10px;">Editar Textos Gerais</h4>
@@ -534,6 +565,7 @@
             <!-- Criar/Editar Categorias -->
             <div style="background: white; padding: 15px; border-radius: 12px; margin-bottom: 15px;">
                 <h4 style="margin-bottom: 10px;">Criar / Gerenciar Categorias</h4>
+                <input type="hidden" id="edit-category-id">
                 <div class="form-group">
                     <label>Nome da Categoria</label>
                     <input type="text" id="cat-name-input" placeholder="Ex: Carnes">
@@ -542,7 +574,9 @@
                     <label>URL da Imagem Ícone (Opcional)</label>
                     <input type="text" id="cat-img-input" placeholder="https://exemplo.com/imagem.png">
                 </div>
-                <button class="btn-submit" onclick="saveCategory()">Salvar Categoria</button>
+                <button class="btn-submit" id="btn-save-cat" onclick="saveCategory()">Salvar Categoria</button>
+                <button class="btn-submit btn-danger" id="btn-delete-cat" onclick="deleteCategory()" style="display:none;">Excluir Categoria</button>
+                <button class="btn-submit" id="btn-cancel-cat-edit" onclick="clearCategoryForm()" style="background:#999; display:none; margin-top:5px;">Cancelar Edição</button>
                 
                 <div class="manage-cat-list" id="manage-cat-list-container">
                     <!-- Lista de Categorias para Exclusão Rápida -->
@@ -614,9 +648,9 @@
         ];
 
         let products = JSON.parse(localStorage.getItem('market_products')) || [
-            { id: 1, name: 'Banana Prata', price: 1.20, unit: '/kg', category: 'cat-1', img: 'https://i.imgur.com/GZgygU7.png' },
-            { id: 2, name: 'Brócolis Orgânico', price: 2.50, unit: '/unid', category: 'cat-2', img: 'https://i.imgur.com/9vBByN9.png' },
-            { id: 3, name: 'Ovos Caipira', price: 3.00, unit: '/dz', category: 'cat-3', img: 'https://i.imgur.com/XUfF2A9.png' }
+            { id: 1, name: 'Banana Prata', price: 1.20, unit: '/kg', category: 'cat-1', img: 'https://i.imgur.com/GZgygU7.png', order: 0 },
+            { id: 2, name: 'Brócolis Orgânico', price: 2.50, unit: '/unid', category: 'cat-2', img: 'https://i.imgur.com/9vBByN9.png', order: 1 },
+            { id: 3, name: 'Ovos Caipira', price: 3.00, unit: '/dz', category: 'cat-3', img: 'https://i.imgur.com/XUfF2A9.png', order: 2 }
         ];
 
         let cart = JSON.parse(localStorage.getItem('market_cart')) || [];
@@ -625,6 +659,8 @@
         let selectedCategory = null;
         let appGreeting = localStorage.getItem('market_greeting') || 'Olá, Sarah 👋';
         let appSubtitle = localStorage.getItem('market_subtitle') || 'O que você gostaria de comprar hoje?';
+        
+        let draggedElement = null;
 
         // Inicializar aplicação
         function init() {
@@ -675,7 +711,8 @@
             alert("Textos atualizados com sucesso!");
         }
 
-        // RENDERIZAR CATEGORIAS
+        // ============ CATEGORIAS ============
+
         function renderCategories() {
             const container = document.getElementById('categories-container');
             const selectContainer = document.getElementById('prod-category-select');
@@ -686,26 +723,26 @@
             listManageContainer.innerHTML = '';
 
             categories.forEach(cat => {
-                // Elemento Visual da Home
                 let activeClass = selectedCategory === cat.id ? 'selected' : '';
                 container.innerHTML += `
                     <div class="category-card ${activeClass}" onclick="toggleCategory('${cat.id}')">
                         <img src="${cat.img || 'https://cdn-icons-png.flaticon.com/512/706/706164.png'}" alt="${cat.name}">
                         <span>${cat.name}</span>
                         <div class="category-actions">
-                            <span class="edit-btn-inline" onclick="editCategoryInline(event, '${cat.id}')">Editar</span>
-                            <span class="edit-btn-inline delete-btn-inline" onclick="deleteCategory(event, '${cat.id}')">Excluir</span>
+                            <span class="edit-btn-inline" onclick="editCategoryForm(event, '${cat.id}')">Editar</span>
+                            <span class="edit-btn-inline delete-btn-inline" onclick="deleteCategoryQuick(event, '${cat.id}')">Excluir</span>
                         </div>
                     </div>
                 `;
-                // Opção no formulário de cadastro de produtos
                 selectContainer.innerHTML += `<option value="${cat.id}">${cat.name}</option>`;
 
-                // Item na lista de gerenciamento da aba Config
                 listManageContainer.innerHTML += `
                     <div class="manage-cat-item">
                         <span>${cat.name}</span>
-                        <span class="material-icons delete-btn-inline" style="cursor:pointer; font-size:18px;" onclick="deleteCategory(event, '${cat.id}')">delete</span>
+                        <div>
+                            <span class="material-icons" style="color: var(--primary); cursor:pointer; font-size:18px; margin-right: 5px;" onclick="editCategoryForm(event, '${cat.id}')">edit</span>
+                            <span class="material-icons delete-btn-inline" style="cursor:pointer; font-size:18px;" onclick="deleteCategoryQuick(event, '${cat.id}')">delete</span>
+                        </div>
                     </div>
                 `;
             });
@@ -713,7 +750,7 @@
 
         function toggleCategory(catId) {
             if(selectedCategory === catId) {
-                selectedCategory = null; // desmarca
+                selectedCategory = null;
             } else {
                 selectedCategory = catId;
             }
@@ -721,19 +758,50 @@
             renderProducts();
         }
 
-        function editCategoryInline(event, catId) {
+        function editCategoryForm(event, catId) {
             event.stopPropagation();
             let cat = categories.find(c => c.id === catId);
-            let newName = prompt("Altere o nome da categoria:", cat.name);
-            if(newName) {
-                cat.name = newName;
-                saveData();
-                renderCategories();
-            }
+            
+            document.getElementById('edit-category-id').value = cat.id;
+            document.getElementById('cat-name-input').value = cat.name;
+            document.getElementById('cat-img-input').value = cat.img;
+
+            document.getElementById('btn-save-cat').innerText = "Atualizar Categoria";
+            document.getElementById('btn-delete-cat').style.display = "block";
+            document.getElementById('btn-cancel-cat-edit').style.display = "block";
+            
+            switchScreen('manage');
         }
 
-        // FUNÇÃO PARA EXCLUIR CATEGORIA
-        function deleteCategory(event, catId) {
+        function saveCategory() {
+            let id = document.getElementById('edit-category-id').value;
+            let nameInput = document.getElementById('cat-name-input').value;
+            let imgInput = document.getElementById('cat-img-input').value;
+
+            if(!nameInput) return alert("Digite o nome da categoria!");
+
+            if(id) {
+                // Editando existente
+                let cat = categories.find(c => c.id === id);
+                cat.name = nameInput;
+                cat.img = imgInput || 'https://cdn-icons-png.flaticon.com/512/706/706164.png';
+                alert("Categoria atualizada!");
+            } else {
+                // Criando nova
+                categories.push({
+                    id: 'cat-' + Date.now(),
+                    name: nameInput,
+                    img: imgInput || 'https://cdn-icons-png.flaticon.com/512/706/706164.png'
+                });
+                alert("Categoria cadastrada!");
+            }
+
+            clearCategoryForm();
+            saveData();
+            renderCategories();
+        }
+
+        function deleteCategoryQuick(event, catId) {
             event.stopPropagation();
             if(confirm("Tem certeza que deseja excluir esta categoria? Os produtos vinculados a ela ficarão sem categoria.")) {
                 categories = categories.filter(c => c.id !== catId);
@@ -744,47 +812,53 @@
             }
         }
 
-        function saveCategory() {
-            let nameInput = document.getElementById('cat-name-input').value;
-            let imgInput = document.getElementById('cat-img-input').value;
+        function deleteCategory() {
+            let id = document.getElementById('edit-category-id').value;
+            if(!id) return;
 
-            if(!nameInput) return alert("Digite o nome da categoria!");
-
-            categories.push({
-                id: 'cat-' + Date.now(),
-                name: nameInput,
-                img: imgInput || 'https://cdn-icons-png.flaticon.com/512/706/706164.png'
-            });
-
-            document.getElementById('cat-name-input').value = '';
-            document.getElementById('cat-img-input').value = '';
-            
-            saveData();
-            renderCategories();
-            alert("Categoria cadastrada!");
+            if(confirm("Tem certeza que deseja excluir esta categoria? Os produtos vinculados a ela ficarão sem categoria.")) {
+                categories = categories.filter(c => c.id !== id);
+                if(selectedCategory === id) selectedCategory = null;
+                clearCategoryForm();
+                saveData();
+                renderCategories();
+                renderProducts();
+                alert("Categoria excluída com sucesso!");
+            }
         }
 
-        // RENDERIZAR PRODUTOS
+        function clearCategoryForm() {
+            document.getElementById('edit-category-id').value = '';
+            document.getElementById('cat-name-input').value = '';
+            document.getElementById('cat-img-input').value = '';
+            document.getElementById('btn-save-cat').innerText = "Salvar Categoria";
+            document.getElementById('btn-delete-cat').style.display = "none";
+            document.getElementById('btn-cancel-cat-edit').style.display = "none";
+        }
+
+        // ============ PRODUTOS ============
+
         function renderProducts() {
             const container = document.getElementById('products-container');
             const searchVal = document.getElementById('search-input').value.toLowerCase();
             container.innerHTML = '';
 
-            let filtered = products;
+            let filtered = products.slice();
 
-            // Filtro por categoria
             if(selectedCategory) {
                 filtered = filtered.filter(p => p.category === selectedCategory);
             }
 
-            // Filtro por busca digitada
             if(searchVal) {
                 filtered = filtered.filter(p => p.name.toLowerCase().includes(searchVal));
             }
 
+            // Ordenar por ordem
+            filtered.sort((a, b) => (a.order || 0) - (b.order || 0));
+
             filtered.forEach(p => {
                 container.innerHTML += `
-                    <div class="product-card">
+                    <div class="product-card" draggable="true" ondragstart="dragStart(event, ${p.id})" ondragover="dragOver(event)" ondrop="drop(event, ${p.id})">
                         <span class="material-icons edit-prod-icon" onclick="editProduct(event, ${p.id})">edit</span>
                         <img src="${p.img || 'https://cdn-icons-png.flaticon.com/512/1047/1047553.png'}" alt="${p.name}">
                         <div class="product-title">${p.name}</div>
@@ -793,6 +867,89 @@
                     </div>
                 `;
             });
+        }
+
+        // ============ DRAG & DROP ============
+
+        function dragStart(event, productId) {
+            draggedElement = productId;
+            event.target.closest('.product-card').classList.add('dragging');
+        }
+
+        function dragOver(event) {
+            event.preventDefault();
+        }
+
+        function drop(event, targetProductId) {
+            event.preventDefault();
+            if(draggedElement && draggedElement !== targetProductId) {
+                swapProductOrder(draggedElement, targetProductId);
+            }
+            document.querySelectorAll('.product-card').forEach(card => card.classList.remove('dragging'));
+        }
+
+        function swapProductOrder(sourceId, targetId) {
+            let source = products.find(p => p.id === sourceId);
+            let target = products.find(p => p.id === targetId);
+            
+            if(source && target) {
+                let tempOrder = source.order || 0;
+                source.order = target.order || 0;
+                target.order = tempOrder;
+                
+                saveData();
+                renderProducts();
+            }
+        }
+
+        // ============ IMPORTAÇÃO EM MASSA ============
+
+        function importBulkProducts() {
+            const textarea = document.getElementById('bulk-import-area').value;
+            if(!textarea.trim()) return alert("Cole os dados primeiro!");
+
+            try {
+                let newProducts = [];
+                
+                if(textarea.trim().startsWith('[')) {
+                    // Formato JSON
+                    let jsonData = JSON.parse(textarea);
+                    newProducts = jsonData.map((item, index) => ({
+                        id: Date.now() + index,
+                        name: item.name || item.Nome || '',
+                        price: parseFloat(item.price || item.Preço || 0),
+                        unit: item.unit || item.Unidade || '/unid',
+                        category: item.category || item.Categoria || categories[0]?.id || 'cat-1',
+                        img: item.img || item.Imagem || 'https://cdn-icons-png.flaticon.com/512/1047/1047553.png',
+                        order: products.length + index
+                    }));
+                } else {
+                    // Formato CSV
+                    let lines = textarea.trim().split('\n');
+                    newProducts = lines.map((line, index) => {
+                        let parts = line.split(',').map(p => p.trim());
+                        return {
+                            id: Date.now() + index,
+                            name: parts[0] || '',
+                            price: parseFloat(parts[1]) || 0,
+                            unit: parts[2] || '/unid',
+                            category: parts[3] || categories[0]?.id || 'cat-1',
+                            img: parts[4] || 'https://cdn-icons-png.flaticon.com/512/1047/1047553.png',
+                            order: products.length + index
+                        };
+                    }).filter(p => p.name);
+                }
+
+                if(newProducts.length === 0) return alert("Nenhum produto válido encontrado!");
+
+                products = products.concat(newProducts);
+                saveData();
+                renderProducts();
+                document.getElementById('bulk-import-area').value = '';
+                alert(`${newProducts.length} produtos importados com sucesso!`);
+            } catch(err) {
+                alert("Erro ao processar. Verifique o formato:\nCSV: nome,preco,unidade,categoria,imagem\nJSON: [{name:..., price:...}]");
+            }
         }
 
         // SALVAR / EDITAR PRODUTO
@@ -807,13 +964,11 @@
             if(!name || isNaN(price)) return alert("Preencha o nome e o preço corretamente!");
 
             if(id) {
-                // Editando existente
                 let p = products.find(prod => prod.id == id);
                 p.name = name; p.price = price; p.unit = unit; p.category = category; p.img = img;
                 alert("Produto atualizado!");
             } else {
-                // Criando novo
-                products.push({ id: Date.now(), name, price, unit, category, img });
+                products.push({ id: Date.now(), name, price, unit, category, img, order: products.length });
                 alert("Produto cadastrado!");
             }
 
@@ -822,14 +977,12 @@
             renderProducts();
         }
 
-        // FUNÇÃO PARA EXCLUIR PRODUTO
         function deleteProduct() {
             let id = document.getElementById('edit-product-id').value;
             if(!id) return;
 
             if(confirm("Deseja realmente excluir permanentemente este produto do aplicativo?")) {
                 products = products.filter(p => p.id != id);
-                // Também remove do carrinho se ele estiver lá
                 cart = cart.filter(item => item.id != id);
                 
                 clearProductForm();
@@ -842,7 +995,7 @@
         }
 
         function editProduct(event, id) {
-            event.stopPropagation(); // Não dispara outros cliques inesperados
+            event.stopPropagation();
             let p = products.find(prod => prod.id === id);
             
             document.getElementById('edit-product-id').value = p.id;
@@ -870,7 +1023,8 @@
             document.getElementById('btn-cancel-edit').style.display = "none";
         }
 
-        // SISTEMA DO CARRINHO
+        // ============ CARRINHO ============
+
         function addToCart(productId) {
             let p = products.find(prod => prod.id === productId);
             cart.push({ cartId: Date.now(), ...p });
@@ -923,7 +1077,8 @@
             totalText.innerText = `R$ ${total.toFixed(2)}`;
         }
 
-        // TELA: LISTA DE PLANEJAMENTO
+        // ============ LISTA DE PLANEJAMENTO ============
+
         function addShoppingListItem() {
             let input = document.getElementById('new-list-item');
             if(!input.value.trim()) return;
@@ -972,7 +1127,8 @@
             });
         }
 
-        // FUNÇÕES DE BACKUP (EXPORTAR / IMPORTAR)
+        // ============ BACKUP ============
+
         function exportData() {
             const backupData = {
                 categories: categories,
@@ -1017,7 +1173,7 @@
                 }
             };
             reader.readAsText(file);
-            event.target.value = ''; // Limpa o input file
+            event.target.value = '';
         }
 
         // Inicializa ao carregar a página
